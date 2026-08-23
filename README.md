@@ -6,11 +6,16 @@ A small playground project to learn [Pydantic AI](https://ai.pydantic.dev/). It 
   agent is not a chat interface: you send one prompt and you get one reply.
 - **Case agent** — a tiny case management sample. The agent has to decide the priority of a case (1 is the
   highest, 5 the lowest) and store it. It uses:
-  - a typed output (`CaseResponse`), so the model returns a `Case` plus an explanation instead of free text;
+  - two typed outputs, so the run ends either with a `CaseResponse` or with a `PriorityRejected` instead of
+    free text;
+  - an output function, `store_priority`, that validates the priority the model picked, writes it to the
+    repository and ends the run, with a `ModelRetry` to send the model back when the priority is wrong;
   - dependencies (`CaseAgentDeps`) to inject the `case_id`, the user name and the `CaseRepository`, so the
     agent cannot pick another case than the one it was started for;
-  - two `async` tools, `get_case_details` and `store_case_priority`, that talk to the repository;
-  - dynamic instructions that personalise the run with the name of the user.
+  - one `async` tool, `get_case_details`, that talks to the repository;
+  - dynamic instructions that personalise the run with the name of the user;
+  - a variant, `create_case_agent_with_hand_off()`, whose output function hands the case over to a second
+    agent that phrases the message for the reporter of the case.
 
 Both runs are instrumented with [Logfire](https://logfire.pydantic.dev/), so you can follow the agent run,
 the model calls and every tool call in a trace.
@@ -24,10 +29,11 @@ about this project.
 main.py                              entry point, runs the friendly or the case agent
 src/pydantic_ai_tryout/
     friendly_agent.py                the minimal agent
-    case_agent.py                    Case, CaseResponse, CaseRepository, CaseAgentDeps, create_case_agent()
+    case_agent.py                    Case, CaseResponse, PriorityRejected, CaseRepository, CaseAgentDeps,
+                                     create_case_agent(), create_case_agent_with_hand_off()
 tests/
     test_case_agent.py               tests for the repository and the agent, no model calls
-    conftest.py                      autouse fixture with a fake OPENAI_API_KEY
+    conftest.py                      sets a fake OPENAI_API_KEY before the agents are created
 notes.md                             the write-up, step by step
 Makefile                             sync, test and run shortcuts
 ```
@@ -65,8 +71,9 @@ make run
 ```
 
 This calls `main_case()`, which asks the case agent to prioritise `case_3` (the broken coffee machine).
-The agent calls `get_case_details`, decides on a priority, calls `store_case_priority` and returns a
-`CaseResponse`:
+The agent calls `get_case_details`, decides on a priority and finishes through the `store_priority` output
+function, which stores the priority and returns the `CaseResponse`. The trace below was recorded with the
+older version, where storing the priority was still a tool:
 
 ```text
 Logfire project URL: https://logfire-eu.pydantic.dev/jettro/starter-project
@@ -100,8 +107,10 @@ make test
 ```
 
 The tests never call OpenAI. They replace the model with `TestModel` or a scripted `FunctionModel` through
-`agent.override(...)`, so they are free and fast. A fake `OPENAI_API_KEY` is set in `tests/conftest.py`,
-because the agent resolves the OpenAI model the moment it is created.
+`agent.override(...)`, so they are free and fast. Next to the happy path, they cover the `ModelRetry` on an
+out of range priority, the `PriorityRejected` output and the hand off to the message agent. A fake
+`OPENAI_API_KEY` is set at the top of `tests/conftest.py`, because an agent resolves the OpenAI model the
+moment it is created, and the module level message agent does that on import.
 
 ## Make targets
 

@@ -1,9 +1,11 @@
+import argparse
 import asyncio
 
 import logfire
 from dotenv import load_dotenv
 
-from pydantic_ai_tryout.case_agent import create_case_agent, CaseAgentDeps, CaseRepository
+from pydantic_ai_tryout.case_agent import (CaseAgentDeps, CaseRepository, CaseResponse, PriorityRejected,
+                                           create_case_agent)
 from pydantic_ai_tryout.friendly_agent import create_friendly_agent
 
 
@@ -15,7 +17,7 @@ async def main():
     print(result.output)
 
 
-async def main_case():
+async def main_case(case_id: str):
     agent = create_case_agent()
     result = await agent.run(
         user_prompt=(f"You goal is to prioritise the case, but only if it is not yet prioritized."
@@ -23,14 +25,18 @@ async def main_case():
                      f"A case can have a priority of 1 to 5, where 1 is highest priority."
                      f"Explain on what basis you prioritize the case."
                      f"Use your tools to get the case details and determine if it is prioritized."
-                     f"After prioritizing the case, use the update_case_priority tool to update the case priority."),
+                     f"Finish by storing the priority you determined, or by rejecting the prioritization."),
         deps=CaseAgentDeps(
-            case_id="case_3",
+            case_id=case_id,
             user_name="Jettro",
             case_repository=CaseRepository()
         )
     )
-    print(result.output)
+    match result.output:
+        case CaseResponse() as response:
+            print(f"Priority {response.case.case_priority}: {response.message}")
+        case PriorityRejected() as rejected:
+            print(f"Not prioritized: {rejected.reason}")
 
     print("\n--- Details ---")
     usage = result.usage
@@ -43,6 +49,12 @@ async def main_case():
     print(f"tool calls: {usage.tool_calls}")
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Prioritise a case with the case agent.")
+    parser.add_argument("case_id", nargs="?", default="case_1",
+                        help="The id of the case to prioritize, for example case_4 (default: case_1).")
+    return parser.parse_args()
+
 
 if __name__ == "__main__":
     load_dotenv()
@@ -52,4 +64,7 @@ if __name__ == "__main__":
     logfire.instrument_pydantic_ai()
 
     # asyncio.run(main())
-    asyncio.run(main_case())
+
+    args = parse_args()
+
+    asyncio.run(main_case(args.case_id))

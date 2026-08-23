@@ -1,7 +1,5 @@
-import pytest
+import os
 
-
-@pytest.fixture(autouse=True)
-def openai_api_key(monkeypatch):
-    """The agent resolves the OpenAI model on creation, a fake key keeps the tests offline."""
-    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+# The agents resolve the OpenAI model when they are created, the module level message agent already does that
+# on import. A fake key keeps the tests offline, no request leaves the machine.
+os.environ.setdefault("OPENAI_API_KEY", "test-key")

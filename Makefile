@@ -1,4 +1,5 @@
 UV ?= uv
+CASE ?= $(firstword $(filter case_%,$(MAKECMDGOALS)))
 
 .DEFAULT_GOAL := help
 .PHONY: help sync lock upgrade test test-verbose run clean
@@ -22,8 +23,12 @@ test: ## Run the tests
 test-verbose: ## Run the tests with the full output
 	$(UV) run pytest -vv
 
-run: ## Run main.py, calls the case agent with the real model
-	$(UV) run python main.py
+run: ## Run main.py, calls the case agent with the real model, e.g. make run case_4
+	$(UV) run python main.py $(CASE)
+
+# Swallow case ids passed as extra goals, e.g. make run case_4
+case_%:
+	@:
 
 clean: ## Remove the caches and the build artifacts
 	rm -rf .pytest_cache dist build *.egg-info
