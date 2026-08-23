@@ -32,6 +32,17 @@ async def main_case():
     )
     print(result.output)
 
+    print("\n--- Details ---")
+    usage = result.usage
+    print(f"Cost: {usage.cost}")
+    print(f"reasoning tokens: {usage.details['reasoning_tokens']}")
+    print(f"input tokens: {usage.input_tokens}")
+    print(f"output tokens: {usage.output_tokens}")
+    print(f"output reasoning tokens: {usage.output_reasoning_tokens}")
+    print(f"Requests: {usage.requests}")
+    print(f"tool calls: {usage.tool_calls}")
+
+
 
 if __name__ == "__main__":
     load_dotenv()

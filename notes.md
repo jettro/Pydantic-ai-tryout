@@ -225,3 +225,18 @@ run: ## Run main.py, calls the case agent with the real model
 
 The `help` target parses the `##` comments behind the target names, so a new target shows up in the overview as soon as you document it that way. Next to these three, the Makefile has `lock` and `upgrade` for the dependencies and `clean` for the caches.
 
+## Observability Pydantic AI
+
+The response from the agent is of type `RunResult`, this also contains usage data. You can read the usage data as follows.
+
+```python
+    print("\n--- Details ---")
+    usage = result.usage
+    print(f"Cost: {usage.cost}")
+    print(f"reasoning tokens: {usage.details['reasoning_tokens']}")
+    print(f"input tokens: {usage.input_tokens}")
+    print(f"output tokens: {usage.output_tokens}")
+    print(f"output reasoning tokens: {usage.output_reasoning_tokens}")
+    print(f"Requests: {usage.requests}")
+    print(f"tool calls: {usage.tool_calls}")
+```
