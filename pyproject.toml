@@ -1,7 +1,7 @@
 [project]
 name = "pydantic-ai-tryout"
 version = "0.1.0"
-description = "Add your description here"
+description = "Playground project for Pydantic AI, Evals and Logfire, with a case prioritisation agent"
 readme = "README.md"
 authors = [
     { name = "Jettro Coenradie", email = "jettro@coenradie.com" }
@@ -19,3 +19,12 @@ pydantic-ai-tryout = "pydantic_ai_tryout:main"
 [build-system]
 requires = ["uv_build>=0.12.3,<0.13.0"]
 build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+]

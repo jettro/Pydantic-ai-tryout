@@ -35,11 +35,13 @@ class CaseRepository:
         self.cases = {
         }
 
-    def get_case(self, case_id: str):
+    async def get_case(self, case_id: str) -> Case:
         ...
-    def update_case_priority(self, case_id: str, priority: int) -> Case:
+    async def update_case_priority(self, case_id: str, priority: int) -> Case:
         ...
 ```
+
+The repository methods are `async`, as a real case store is usually a remote system that you talk to over the network. In the sample, an `await asyncio.sleep(0.1)` stands in for that latency.
 
 ## Dependencies
 
@@ -102,16 +104,18 @@ def create_case_agent():
                 f"In your response, always return the case details and a message in the {CaseResponse.__name__} format.")
 
     @agent.tool()
-    def get_case_details(ctx: RunContext[CaseAgentDeps]) -> Case:
-        case = ctx.deps.case_repository.get_case(ctx.deps.case_id)
+    async def get_case_details(ctx: RunContext[CaseAgentDeps]) -> Case:
+        case = await ctx.deps.case_repository.get_case(ctx.deps.case_id)
         return case
 
     @agent.tool()
-    def store_case_priority(ctx: RunContext[CaseAgentDeps], new_priority: int) -> None:
-        ctx.deps.case_repository.update_case_priority(ctx.deps.case_id, new_priority)
+    async def store_case_priority(ctx: RunContext[CaseAgentDeps], new_priority: int) -> None:
+        await ctx.deps.case_repository.update_case_priority(ctx.deps.case_id, new_priority)
 
     return agent
 ```
+
+Tools can be sync or async. Pydantic AI runs a sync tool in a thread pool, an async tool runs on the event loop itself. As soon as a tool does I/O, an HTTP call or a database query, make it `async def` and `await` the call. That way the event loop is free to do other work while the tool waits.
 
 ## Calling the agent
 
@@ -165,4 +169,59 @@ logfire.instrument_pydantic_ai()
 ```
 
 ![Screenshot of Logfire trace](images/screenshot-logfire-tool.png)
+
+## Testing the agent without calling the model
+
+Testing an agent should not cost you tokens. Pydantic AI ships two model implementations for that: `TestModel` calls every tool of the agent and makes up an output, `FunctionModel` lets you write the model as a function, so you decide which tool is called with which arguments. With `agent.override(model=...)`, you swap the model for the duration of the test, the agent itself stays untouched.
+
+```bash
+uv add --dev pytest pytest-asyncio
+```
+
+```python
+@pytest.mark.asyncio
+async def test_agent_run_stores_the_priority_chosen_by_the_model(case_agent_deps, case_repository):
+    prioritized_case = (await case_repository.get_case("case_3")).model_copy(update={"case_priority": 3})
+
+    async def scripted_model(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        step = len([message for message in messages if isinstance(message, ModelResponse)])
+        if step == 0:
+            return ModelResponse(parts=[ToolCallPart("get_case_details", {})])
+        if step == 1:
+            return ModelResponse(parts=[ToolCallPart("store_case_priority", {"new_priority": 3})])
+        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name,
+                                                 {"case": prioritized_case.model_dump(),
+                                                  "message": "The coffee machine blocks the engineers."})])
+
+    agent = create_case_agent()
+
+    with agent.override(model=FunctionModel(scripted_model)):
+        result = await agent.run(user_prompt=USER_PROMPT, deps=case_agent_deps)
+
+    assert result.output.case.case_priority == 3
+    assert (await case_repository.get_case("case_3")).case_priority == 3
+```
+
+The last response of the scripted model is the output tool call, `info.output_tools[0].name` gives you the name Pydantic AI generated for the `CaseResponse` output type. Two details are easy to miss. The tests need `pytest-asyncio`, as both the tools and the repository are `async`. And the agent resolves the OpenAI model when you create it, so a fake `OPENAI_API_KEY` has to be in the environment even though no request leaves your machine, I set it in an autouse fixture in `tests/conftest.py`.
+
+```bash
+uv run pytest
+```
+
+## A Makefile for the repeating commands
+
+The commands you type all day are short, but easy to forget. A small `Makefile` collects them, `make` on its own prints the available targets.
+
+```makefile
+sync: ## Install the project and the dev dependencies in .venv
+	uv sync --all-groups
+
+test: ## Run the tests
+	uv run pytest -q
+
+run: ## Run main.py, calls the case agent with the real model
+	uv run python main.py
+```
+
+The `help` target parses the `##` comments behind the target names, so a new target shows up in the overview as soon as you document it that way. Next to these three, the Makefile has `lock` and `upgrade` for the dependencies and `clean` for the caches.
 
