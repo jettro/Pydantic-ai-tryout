@@ -425,3 +425,121 @@ The response from the agent is of type `RunResult`, this also contains usage dat
     print(f"Requests: {usage.requests}")
     print(f"tool calls: {usage.tool_calls}")
 ```
+
+## Model Context Protocol (MCP): Toolsets, Capabilities, and Native Execution
+
+The Model Context Protocol (MCP) provides an open standard for connecting AI models and agents to external data sources and tools. In this playground, we explored how to decouple case repository operations into an MCP server and integrate it back into Pydantic AI agents using different paradigms.
+
+### 1. Exposing Case Management via FastMCP Server
+
+Instead of baking the `CaseRepository` directly into agent dependencies or local tool functions, we extracted it into a standalone [FastMCP](https://github.com/jlowin/fastmcp) server (`src/pydantic_ai_tryout/case_server.py`).
+
+The server exposes three core MCP primitives:
+- **Tools**: Functions callable by the agent (`get_case`, `update_case_priority`, `list_cases`).
+- **Resources**: Read-only structured data accessible via URIs (`cases://all`, `cases://{case_id}`).
+- **Prompts**: Pre-configured prompt templates (`prioritize_case`).
+
+```python
+from mcp.server.fastmcp import FastMCP
+from pydantic_ai_tryout.case_agent import CaseRepository
+
+def create_case_server(repository: CaseRepository | None = None) -> FastMCP:
+    repo = repository or CaseRepository()
+    server = FastMCP(name="Case Repository Server")
+
+    @server.tool()
+    async def get_case(case_id: str) -> Case:
+        return await repo.get_case(case_id)
+
+    @server.tool()
+    async def update_case_priority(case_id: str, priority: int) -> Case:
+        return await repo.update_case_priority(case_id, priority)
+
+    return server
+```
+
+### 2. Connecting Agents: Low-Level Toolsets vs. Modern Capabilities
+
+Pydantic AI offers two ways to connect an agent to an MCP server: the lower-level **Toolsets API** and the high-level **Capabilities API**.
+
+#### Approach A: Low-Level Toolset (`MCPToolset`)
+In `src/pydantic_ai_tryout/case_mcp_agent.py`, the agent consumes the server via `pydantic_ai.mcp.MCPToolset`:
+
+```python
+from pydantic_ai import Agent
+from pydantic_ai.mcp import MCPToolset
+from pydantic_ai_tryout.case_server import create_case_server
+
+server = create_case_server()
+toolset = MCPToolset(server)
+
+agent = Agent(
+    model="openai:gpt-5.6-luna",
+    toolsets=[toolset],
+)
+```
+
+#### Approach B: High-Level Capability (`capabilities=[MCP(...)]`)
+In `src/pydantic_ai_tryout/case_capability_agent.py`, the agent uses Pydantic AI's unified `MCP` capability:
+
+```python
+from pydantic_ai import Agent
+from pydantic_ai.capabilities import MCP
+from pydantic_ai_tryout.case_server import create_case_server
+
+server = create_case_server()
+mcp_capability = MCP(local=server, native=False)
+
+agent = Agent(
+    model="openai:gpt-5.6-luna",
+    capabilities=[mcp_capability],
+)
+```
+
+#### Comparison
+
+| Feature | Low-Level `MCPToolset` | Unified `MCP` Capability |
+| :--- | :--- | :--- |
+| **Configuration** | `Agent(toolsets=[MCPToolset(server)])` | `Agent(capabilities=[MCP(...)])` |
+| **Abstraction Level** | Direct toolset wrapping | High-level capability encapsulating tools, transports, and lifecycles |
+| **Native Execution** | Not supported (strictly local client execution) | Supported (`native=True`, with automatic fallback to `local=True`) |
+| **Transport Support** | Primarily local in-process / client instances | In-process, subprocess stdio, remote HTTP/SSE, and provider-native URLs |
+| **Lifecycle & Sampling** | Manual client lifecycle management | Native lifecycle hooks and MCP sampling integration |
+
+### 3. Local Execution vs. Provider-Native MCP (`native=True`)
+
+Pydantic AI distinguishes between **local execution** and **provider-native execution**:
+
+1. **Local Execution (`native=False` or `MCP(local=...)`)**:
+   - The Python runtime intercepts tool calls requested by the model.
+   - The client invokes the tool against the in-process server or remote endpoint and returns the output to the model.
+   - **Trade-off**: Full local visibility and telemetry (via Logfire), runs within private perimeters, but incurs client round-trips.
+
+2. **Provider-Native MCP (`native=True`)**:
+   - Pydantic AI offloads tool execution directly to the model provider (e.g. Anthropic or OpenAI/Azure OpenAI Responses API).
+   - The model provider's cloud infrastructure directly makes HTTP calls to the MCP server endpoint.
+   - **Important Constraint**: Cloud LLM providers cannot reach `localhost` or local OS `stdio` subprocesses. Running an out-of-process local server with `native=True` requires exposing it through a public tunnel (such as ngrok or Cloudflare Tunnel).
+   - **Cloud Deployments (e.g., Azure OpenAI)**: If deploying to Azure where both Azure OpenAI and the MCP server reside in the cloud, `native=True` works seamlessly over HTTPS. Authentication is supported via `authorization_token` (e.g., Bearer/Entra ID tokens) and custom `headers`:
+     ```python
+     MCP(
+         url="https://mcp-case-service.azurewebsites.net/sse",
+         native=True,
+         local=True,  # Fallback to local execution if provider native is unsupported
+         authorization_token="Bearer eyJhbGciOi...",
+         headers={"Ocp-Apim-Subscription-Key": "my-apim-key"},
+     )
+     ```
+
+### 4. Dependency Management: Why Pin `mcp<2`
+
+In `pyproject.toml`, we specify `mcp<2` alongside `fastmcp>=2.14.1`:
+- **SemVer Protocol Stability**: The official Model Context Protocol Python SDK (`mcp`) is in the `1.x` series. A future `2.0.0` will denote breaking protocol/schema changes.
+- **Ecosystem Compatibility**: `fastmcp` and `pydantic-ai-slim[mcp]` rely on `mcp` 1.x internal types and schemas.
+- **Avoiding Package Confusion**: `fastmcp` (the server framework) uses `2.x+` versioning, while `mcp` (the underlying protocol SDK) uses `1.x`. Pinning `mcp<2` avoids unvetted major upgrades while safely receiving non-breaking patches (`1.x.y`).
+
+### 5. Potential Improvements & Future Considerations
+
+- **Resource & Prompt Integration in Agents**: Currently, agents primarily interact through tools. Future iterations can integrate server resources (`cases://all`) directly into system prompt contexts or provide tool fallbacks for resource exploration.
+- **MCP Sampling**: With `agent.set_mcp_sampling_model()`, MCP servers can request LLM completions back through the host agent, enabling recursive sub-agent logic inside the server.
+- **Dual-Stack Configuration**: For hybrid architectures, Pydantic AI supports configuring independent native and local endpoints via `MCPServerTool` alongside `local=...`.
+- **Production Packaging**: Deploy FastMCP as a containerized SSE service (e.g. on Azure Container Apps) behind an API Management gateway with Entra ID authentication and Logfire distributed tracing across client and server.

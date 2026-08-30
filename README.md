@@ -31,8 +31,14 @@ src/pydantic_ai_tryout/
     friendly_agent.py                the minimal agent
     case_agent.py                    Case, CaseResponse, PriorityRejected, CaseRepository, CaseAgentDeps,
                                      create_case_agent(), create_case_agent_with_hand_off()
+    case_server.py                   FastMCP server exposing CaseRepository tools, resources, and prompts
+    case_mcp_agent.py                Case agent sample integrated with the FastMCP server via MCPToolset
+    case_capability_agent.py         Case agent sample using Pydantic AI's MCP Capability (local execution)
 tests/
     test_case_agent.py               tests for the repository and the agent, no model calls
+    test_case_server.py              tests for FastMCP server tools, resources, and prompts
+    test_case_mcp_agent.py           tests for the MCP-backed case agent
+    test_case_capability_agent.py    tests for the MCP capability-backed case agent
     conftest.py                      sets a fake OPENAI_API_KEY before the agents are created
 notes.md                             the write-up, step by step
 Makefile                             sync, test and run shortcuts

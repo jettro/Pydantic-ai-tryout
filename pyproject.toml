@@ -8,8 +8,11 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
+    "fastmcp>=2.14.1",
     "logfire[system-metrics]>=4.40.0",
-    "pydantic-ai-slim[logfire,openai]>=2.32.1",
+    "mcp<2",
+    "pydantic-ai-slim[logfire,openai,mcp]>=2.32.1",
+    "pydantic-settings>=2.15.0",
     "python-dotenv>=1.2.3",
 ]
 
